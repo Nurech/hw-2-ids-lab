@@ -1,0 +1,12 @@
+---
+- hosts: localhost
+  tasks:
+    - name: Update all packages
+      apt:
+        upgrade: yes
+        update_cache: yes
+
+    - name: Ensure git is installed
+      apt:
+        name: git
+        state: present
