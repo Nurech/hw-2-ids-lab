@@ -470,3 +470,35 @@
     - name: Show tail output
       debug:
         msg: "{{ tail_output.stdout_lines }}"
+
+
+
+---
+- name: Install Wireshark and configure permissions
+  hosts: localhost
+  become: yes
+
+  tasks:
+    - name: Add Wireshark PPA
+      apt_repository:
+        repo: ppa:wireshark-dev/stable
+        state: present
+
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install Wireshark
+      apt:
+        name: wireshark
+        state: present
+
+    - name: Add user to wireshark group
+      user:
+        name: "{{ ansible_user }}"
+        groups: wireshark
+        append: yes
+
+    - name: Inform user to run Wireshark
+      debug:
+        msg: "Installation complete. Please run Wireshark by executing 'wireshark' in the terminal."
