@@ -2,8 +2,11 @@
 
 Run:
 ```
-wget "https://raw.githubusercontent.com/Nurech/hw-2-ids-lab/master/playbook.yaml?token=GHSAT0AAAAAACHBYQ3WSD57HYFYKPYLSCOCZJA2ILA" -O playbook.yaml && \
-wget "https://raw.githubusercontent.com/Nurech/hw-2-ids-lab/master/start.sh?token=GHSAT0AAAAAACHBYQ3X5HOKKSD7XU54BZRMZJA2EKQ" -O start.sh && \
+sudo wget "https://raw.githubusercontent.com/Nurech/hw-2-ids-lab/master/playbook.yaml" -O playbook.yaml && \
+sudo chown $USER:$USER playbook.yaml && \
+chmod +x playbook.yaml && \
+sudo wget "https://raw.githubusercontent.com/Nurech/hw-2-ids-lab/master/start.sh" -O start.sh && \
+sudo chown $USER:$USER start.sh && \
 chmod +x start.sh && \
 ./start.sh
 ```

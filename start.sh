@@ -22,7 +22,7 @@ if [ ! -d "${HOME}/Desktop/suricata_ansible" ]; then
 fi
 
 # Run Ansible playbook
-if ansible-playbook "${HOME}/Desktop/suricata_ansible/run.yaml"; then
+if ansible-playbook "${HOME}/Desktop/suricata_ansible/playbook.yaml"; then
   echo "Ansible playbook ran successfully"
 else
   echo "Failed to run Ansible playbook"
