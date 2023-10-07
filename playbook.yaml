@@ -1,12 +1,472 @@
 ---
-- hosts: localhost
+- name: Part 1 Setup IDS Lab Environment
+  hosts: localhost
+  become: yes
   tasks:
-    - name: Update all packages
+
+    - name: Part 1  Get default inet interface
+      command: ip route get 8.8.8.8
+      register: interface_output
+      ignore_errors: true
+
+    - name: Conditionally bring up interface if previous task failed
+      block:
+        - name: Identify network interface
+          shell: lshw -C network | awk '/logical name:/ {print $3}'
+          register: network_interface
+
+        - name: Bring up the network interface
+          command: ip link set {{ network_interface.stdout }} up
+
+        - name: Get IP address via DHCP
+          command: dhclient {{ network_interface.stdout }}
+      when: interface_output is failed
+
+    - name: Part 1  Extract interface name
+      set_fact:
+        interface_name: "{{ interface_output.stdout.split('dev')[1].split()[0] }}"
+
+    - name: Part 1  Get IP Address
+      shell: ip -o -4 addr list {{ interface_name }} | awk '{print $4}' | cut -d/ -f1
+      register: ip_output
+
+    - name: Part 1 Print Interface and IP
+      debug:
+        msg: "Interface: {{ interface_name }}, IP Address: {{ ip_output.stdout }}"
+
+    - name: Set Google DNS in /etc/resolv.conf
+      lineinfile:
+        dest: /etc/resolv.conf
+        line: 'nameserver 8.8.8.8'
+        insertbefore: BOF
+
+    - name: Part 1.a Verify Internet connectivity by pinging Google
+      command: ping -c 1 google.com
+      ignore_errors: true
+      failed_when: "'1 received' not in result.stdout"
+      register: result
+
+    - name: Part 1.b Initial network configuration Install network utilities
       apt:
-        upgrade: yes
+        name:
+          - net-tools
+          - ethtool
+        state: latest
+
+    - name: Part 1.b Modify network interfaces
+      lineinfile:
+        path: /etc/network/interfaces
+        line: "{{ item }}"
+      with_items:
+        - "auto {{ interface_name }}"
+        - "iface {{ interface_name }} inet manual"
+        - "up ifconfig {{ interface_name }} up promisc"
+
+    - name: Part 1.b Restart systemd-networkd service
+      systemd:
+        name: systemd-networkd
+        state: restarted
+
+    - name: Part 1.c Turn off packet offloading - Disable GRO
+      command: ethtool -K {{ interface_name }} gro off
+
+    - name: Part 1.c Verify LRO/GRO settings
+      shell: ethtool -k {{ interface_name }} | grep large-receive-offload
+      register: lro_gro_status
+    - debug: var=lro_gro_status.stdout_lines
+
+    - name: Set Google DNS in /etc/resolv.conf
+      lineinfile:
+        dest: /etc/resolv.conf
+        line: 'nameserver 8.8.8.8'
+        insertbefore: BOF
+
+
+- name: Part 2 Install Suricata
+  hosts: localhost
+  become: yes
+  vars:
+    suricata_version: "5.0.2"
+  tasks:
+
+    - name: Remove problematic PPA repository
+      ansible.builtin.apt_repository:
+        repo: 'ppa:micahflee/ppa'
+        state: absent
+
+    - name: Update package list
+      ansible.builtin.apt:
         update_cache: yes
 
-    - name: Ensure git is installed
+
+    - name: Part 2.a Update and Upgrade Repositories
       apt:
-        name: git
+        update_cache: yes
+        upgrade: 'yes'
+
+    - name: Part 2.a Install Pre-requirements
+      apt:
+        name:
+          - libpcre3
+          - libpcre3-dbg
+          - libpcre3-dev
+          - build-essential
+          - autoconf
+          - automake
+          - libtool
+          - libpcap-dev
+          - libnet1-dev
+          - libyaml-0-2
+          - libyaml-dev
+          - zlib1g
+          - zlib1g-dev
+          - libcap-ng-dev
+          - libcap-ng0
+          - libmagic-dev
+          - libjansson-dev
+          - libjansson4
+          - pkg-config
+          - rustc
+          - cargo
+          - liblz4-dev
+          - libnss3-dev
+          - libnspr4-dev
+
+    - name: Part 2.b Download Suricata tarball
+      get_url:
+        url: "http://www.openinfosecfoundation.org/download/suricata-{{ suricata_version }}.tar.gz"
+        dest: "/tmp/suricata-{{ suricata_version }}.tar.gz"
+
+    - name: Part 2.b Extract Suricata tarball
+      unarchive:
+        src: "/tmp/suricata-{{ suricata_version }}.tar.gz"
+        dest: "/tmp/"
+        remote_src: yes
+
+    - name: Part 2.c Configure Suricata
+      command:
+        chdir: "/tmp/suricata-{{ suricata_version }}"
+        cmd: ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var
+
+    - name: Make and Install Suricata
+      raw: |
+        cd /tmp/suricata-{{ suricata_version }};
+        ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var;
+        make;
+        sudo make install;
+
+
+- name: Part 3 Install and Verify Suricata Configuration
+  hosts: localhost
+  become: yes
+  vars:
+    suricata_version: "5.0.2"
+  tasks:
+
+    - name: Part 3.a Install Suricata conf file
+      command:
+        chdir: "/tmp/suricata-{{ suricata_version }}"
+        cmd: sudo make install-conf
+
+    - name: Part 3.b Verify log directory existence
+      stat:
+        path: /var/log/suricata
+      register: log_directory
+
+    - name: Part 3.b Create log directory if not exist
+
+    - name: Part 3.b Create log directory if not exist
+      file:
+        path: /var/log/suricata
+        state: directory
+      when: log_directory.stat is undefined or not log_directory.stat.exists
+
+
+    - name: Part 3.c Verify configuration files existence
+      stat:
+        path: "/etc/suricata/{{ item }}"
+      register: config_files
+      loop:
+        - classification.config
+        - reference.config
+        - suricata.yaml
+
+
+    - name: Part 3.c Create config directory if files not exist
+      file:
+        path: /etc/suricata
+        state: directory
+      when: config_files.results is undefined or config_files.results|map(attribute='stat.exists')|select('equalto', false)|list|length > 0
+
+
+    - name: Part 3.c Copy configuration files if not exist
+      copy:
+        src: "{{ item }}"
+        dest: "/etc/suricata/{{ item }}"
+      loop:
+        - classification.config
+        - reference.config
+        - suricata.yaml
+      when: config_files.results is undefined or config_files.results|map(attribute='stat.exists')|select('equalto', false)|list|length > 0
+
+
+- name: Step 4 and 5 Suricata Configuration
+  hosts: localhost
+  become: yes
+  tasks:
+
+
+    - name: Install python3-pip
+      apt:
+        name: python3-pip
         state: present
+
+    - name: Install Suricata-Update
+      pip:
+        name: suricata-update
+        state: latest
+        executable: pip3
+
+
+    - name: Ensure necessary directories exist
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0775'
+      loop:
+        - /etc/suricata
+        - /var/lib/suricata/rules
+        - /var/lib/suricata/update
+
+
+
+    - name: Add default rule path to suricata.yaml
+      lineinfile:
+        path: /etc/suricata/suricata.yaml
+        line: "default-rule-path: /var/lib/suricata/rules"
+
+
+    - name: Update rule sources
+      command: suricata-update update-sources
+
+
+    - name: Enable Emerging threats
+      command: suricata-update enable-source et/open
+
+    - name: Enable Trafficid
+      command: suricata-update enable-source oisf/trafficid
+
+    - name: Enable ssl-fp-blacklists
+      command: suricata-update enable-source sslbl/ssl-fp-blacklist
+
+    - name: Enable aggressive rules
+      command: suricata-update enable-source etnetera/aggressive
+
+
+    - name: Update rules after enabling
+      command: suricata-update
+
+
+    - name: List enabled sources
+      command: suricata-update list-enabled-sources
+      register: enabled_sources
+      changed_when: false
+
+    - debug:
+        msg: "{{ enabled_sources.stdout }}"
+
+
+---
+- name: Configure Suricata IDS
+  hosts: localhost
+  become: yes
+  vars:
+    suricata_config_path: "/etc/suricata"
+    suricata_interface: "ens33"
+
+  tasks:
+    - name: Get the current machine's IP address
+      shell: "hostname -I | awk '{print $1}'"
+      register: machine_ip
+      changed_when: false
+
+    - name: Create a Suricata configuration file
+      template:
+        src: suricata.yaml.j2
+        dest: "{{ suricata_config_path }}/suricata.yaml"
+
+    - name: Edit Suricata service file in tmp before copy
+      lineinfile:
+        path: /tmp/suricata-5.0.2/etc/suricata.service
+        regexp: '^ExecStart='
+        line: 'ExecStart=/usr/sbin/suricata -c /etc/suricata/suricata.yaml --pidfile /var/run/suricata.pid -i ens33'
+      become: yes
+
+    - name: Copy Suricata service file to systemd
+      command: "cp /tmp/suricata-5.0.2/etc/suricata.service /etc/systemd/system"
+      become: yes
+      async: 120
+
+    - name: Start Suricata
+      systemd:
+        name: suricata
+        state: started
+      async: 120
+      poll: 0
+
+    - name: Create the /etc/suricata/rules/ directory
+      file:
+        path: /etc/suricata/rules/
+        state: directory
+        mode: "0755"
+        recurse: yes
+      become: yes
+
+    - name: Check Suricata status
+      systemd:
+        name: suricata
+        state: restarted
+
+    - name: Verify if Suricata is running
+      command: "systemctl status suricata"
+      register: suricata_status
+
+    - name: Copy Suricata binary to /sbin
+      command: "cp /usr/bin/suricata /sbin/suricata"
+      args:
+        creates: "/sbin/suricata"
+      become: yes
+
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
+      become: yes
+
+    - name: Restart Suricata
+      systemd:
+        name: suricata
+        state: restarted
+      become: yes
+
+    - name: Edit Suricata service file
+      lineinfile:
+        path: /etc/systemd/system/suricata.service
+        regexp: '^ExecStart='
+        line: 'ExecStart=/usr/sbin/suricata -c /etc/suricata/suricata.yaml --pidfile /var/run/suricata.pid -i ens33'
+      become: yes
+
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
+      become: yes
+      when: "'FAILED' in suricata_status.stdout"
+
+    - name: Restart Suricata
+      systemd:
+        name: suricata
+        state: restarted
+      become: yes
+      when: "'FAILED' in suricata_status.stdout"
+
+    - name: Tail Suricata log
+      command: "tail -f /var/log/suricata/suricata.log"
+      async: 600
+      poll: 0
+
+
+
+
+- name: Configure Suricata IDS for DDoS detection
+  hosts: localhost
+  become: yes
+
+  vars:
+    suricata_config_path: "/etc/suricata"
+    new_rule_location: "/etc/suricata/rules"
+    suricata_interface: "ens33"
+    target_ip: "1.1.1.1"
+
+  tasks:
+    - name: Create a Suricata configuration file
+      template:
+        src: suricata.yaml.j2
+        dest: "{{ suricata_config_path }}/suricata.yaml"
+
+    - name: Set Google DNS in /etc/resolv.conf
+      lineinfile:
+        dest: /etc/resolv.conf
+        line: 'nameserver 8.8.8.8'
+        insertbefore: BOF
+      become: yes
+      become_method: sudo
+
+    - name: Ensure /etc/resolv.conf is a symlink to /run/systemd/resolve/stub-resolv.conf
+      file:
+        src: /run/systemd/resolve/stub-resolv.conf
+        dest: /etc/resolv.conf
+        state: link
+      become: yes
+
+    - name: Restart NetworkManager
+      systemd:
+        name: NetworkManager
+        state: restarted
+      become: yes
+
+
+    - name: Create a Suricata configuration file (overwrite if exists)
+      template:
+        src: suricata.yaml.j2
+        dest: "{{ suricata_config_path }}/suricata.yaml"
+        force: yes
+
+    - name: Ensure the directory exists
+      file:
+        path: "{{ new_rule_location }}"
+        state: directory
+        recurse: yes
+      become: yes
+
+    - name: Touch the rule file
+      file:
+        path: "{{ new_rule_location }}/ddos.rules"
+        state: touch
+      become: yes
+
+    - name: Part 4. Step 1.a Install hping3
+      apt:
+        name: hping3
+        state: present
+      become: yes
+
+    - name: Create Suricata DDoS rule
+      copy:
+        content: |
+          alert tcp any any -> 1.1.1.1 80 (msg: "Possible DDoS attack"; flags: S; flow: stateless; threshold: type both, track by_dst, count 200, seconds 1; sid:1000001; rev:1;)
+        dest: "{{ new_rule_location }}/ddos.rules"
+      become: yes
+
+
+    - name: Reload Suricata rules
+      command: "suricata-update"
+      become: yes
+
+    - name: Restart Suricata
+      systemd:
+        name: suricata
+        state: restarted
+      become: yes
+
+    - name: Overload the target by pinging (ends in 5 seconds)
+      command: "sudo hping3 -S -p 80 --flood --rand-source {{ target_ip }}"
+      async: 5
+      poll: 0
+      ignore_errors: yes
+
+    - name: Show last 20 lines of Suricata log
+      shell: "tail -n 20 /var/log/suricata/fast.log"
+      register: tail_output
+
+    - name: Show tail output
+      debug:
+        msg: "{{ tail_output.stdout_lines }}"
